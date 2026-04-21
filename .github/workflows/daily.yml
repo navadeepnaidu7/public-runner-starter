@@ -83,13 +83,19 @@ jobs:
 
           override = (os.getenv("INPUT_DATE_CODE") or "").strip()
           ist = timezone(timedelta(hours=5, minutes=30))
-          value = override or datetime.now(ist).strftime("%Y%m%d")
+          value = (override or datetime.now(ist).strftime("%Y%m%d")).strip()
 
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
-            f.write(f"DATE_CODE={value}\\n")
+            f.write(f"DATE_CODE={value}\n")
 
-          print(f"Using DATE_CODE={value}")
+          print(f"Using DATE_CODE={value!r}")
           PY
+
+      - name: Sanitize DATE_CODE
+        shell: bash
+        run: |
+          DATE_CODE="$(printf '%s' "${DATE_CODE}" | tr -d '\r\n' | xargs)"
+          echo "DATE_CODE=$DATE_CODE" >> "$GITHUB_ENV"
 
       - name: Run daily scrape
         working-directory: private-src
