@@ -19,7 +19,7 @@ permissions:
 
 concurrency:
   group: public-runner-daily
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   run-daily:
