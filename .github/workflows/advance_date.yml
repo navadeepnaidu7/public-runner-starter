@@ -65,7 +65,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Set DATE_CODE
-        run: echo "DATE_CODE=20260608" >> "$GITHUB_ENV"
+        run: echo "DATE_CODE=20260802" >> "$GITHUB_ENV"
 
       - name: Run advance scrape
         working-directory: private-src
