@@ -1,0 +1,67 @@
+name: XFF Probe (throwaway)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Show runner egress IP
+        run: curl -s https://ipinfo.io/json || true
+
+      - name: Run XFF spoof probe
+        shell: python {0}
+        run: |
+          import json, urllib.request, urllib.error, gzip, io
+          from datetime import datetime, timedelta, timezone
+
+          ist = timezone(timedelta(hours=5, minutes=30))
+          D = (datetime.now(ist) + timedelta(days=1)).strftime("%Y-%m-%d")
+          # A known-good cinema id with shows (from districtvenues.json[1])
+          CID = "1102311"
+          URL = ("https://www.district.in/gw/consumer/movies/v3/cinema"
+                 "?meta=1&reqData=1&version=3&site_id=1&channel=mweb"
+                 "&child_site_id=1&platform=district&cinemaId=%s&date=%s" % (CID, D))
+          UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+
+          def probe(label, extra):
+              h = {"x-guest-token": "x", "user-agent": UA}
+              h.update(extra)
+              req = urllib.request.Request(URL, headers=h)
+              try:
+                  with urllib.request.urlopen(req, timeout=25) as r:
+                      raw = r.read()
+                      if r.headers.get("Content-Encoding") == "gzip":
+                          raw = gzip.decompress(raw)
+                      body = raw.decode("utf-8", "replace")
+                      denied = "Access Denied" in body
+                      print("%-34s -> %s %s len=%d" % (label, r.status, "DENIED" if denied else "OK", len(body)))
+                      return r.status, denied
+              except urllib.error.HTTPError as e:
+                  raw = e.read()
+                  try:
+                      if e.headers.get("Content-Encoding") == "gzip":
+                          raw = gzip.decompress(raw)
+                  except Exception:
+                      pass
+                  body = raw.decode("utf-8", "replace")
+                  print("%-34s -> %s %s :: %s" % (label, e.code, "DENIED" if "Access Denied" in body else "", body[:80]))
+                  return e.code, "Access Denied" in body
+              except Exception as e:
+                  print("%-34s -> EXC %s" % (label, type(e).__name__))
+                  return None, None
+
+          print("date=%s cinemaId=%s" % (D, CID))
+          print("-" * 60)
+          probe("control (no XFF)", {})
+          probe("XFF = Jio residential", {"x-forwarded-for": "49.37.150.77"})
+          probe("XFF = other residential (Airtel)", {"x-forwarded-for": "122.171.20.15"})
+          probe("XFF = residential, then self", {"x-forwarded-for": "49.37.150.77, 20.60.1.1"})
+          probe("X-Real-IP = residential", {"x-real-ip": "49.37.150.77"})
+          probe("True-Client-IP = residential", {"true-client-ip": "49.37.150.77"})
