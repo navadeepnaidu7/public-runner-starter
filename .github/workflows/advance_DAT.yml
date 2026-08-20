@@ -67,10 +67,27 @@ jobs:
       - name: Set DATE_CODE
         run: echo "DATE_CODE=$(date -u -d '+2 days' '+%Y%m%d')" >> "$GITHUB_ENV"
 
+      - name: Trigger District shard on Railway
+        shell: bash
+        env:
+          RAILWAY_DISTRICT_URL: ${{ secrets.RAILWAY_DISTRICT_URL }}
+          DISTRICT_TRIGGER_SECRET: ${{ secrets.DISTRICT_TRIGGER_SECRET }}
+          DATE_CODE: ${{ env.DATE_CODE }}
+        run: |
+          set -uo pipefail
+          echo "Triggering District (advance) for $DATE_CODE ..."
+          code=$(curl -sS -o /tmp/district.json -w '%{http_code}' -X POST \
+            -H "X-Auth: $DISTRICT_TRIGGER_SECRET" --max-time 300 \
+            "$RAILWAY_DISTRICT_URL/run-district?mode=advance&date=$DATE_CODE" || echo 000)
+          echo "District HTTP $code"; cat /tmp/district.json || true; echo
+          if [ "$code" != "200" ]; then
+            echo "::warning::District trigger failed (HTTP $code) - combine will use last shard 9 in R2"
+          fi
       - name: Run advance scrape
         working-directory: private-src
         env:
           SCRAPE_MODE: advance
+          SHARD_IDS: 1-8
           DATE_CODE: ${{ env.DATE_CODE }}
           R2_ACCOUNT_ID: ${{ env.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY: ${{ env.R2_ACCESS_KEY }}
