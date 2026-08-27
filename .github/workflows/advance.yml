@@ -7,10 +7,6 @@ on:
         description: Optional YYYYMMDD override. If empty, defaults to tomorrow (IST).
         required: false
         type: string
-  push:
-    branches:
-      - main
-      - master
   schedule:
     - cron: "0 * * * *"
 
