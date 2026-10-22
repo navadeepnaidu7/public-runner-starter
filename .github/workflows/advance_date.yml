@@ -177,9 +177,33 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # Some runners get an Ubuntu mirror that crawls at ~50 kB/s, which turned
+      # the apt installs below (Chromium libraries, WARP) into 20+ minute steps.
+      # Keep the downloaded .debs in the Actions cache, keyed on the runner image
+      # so a new image starts a fresh set. apt still resolves and verifies every
+      # package; it only skips the download when the cached file matches.
+      - name: Resolve runner image
+        id: runner-image
+        run: echo "version=${ImageOS}-${ImageVersion}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: ~/apt-archives/*.deb
+          key: apt-${{ steps.runner-image.outputs.version }}
+
+      - name: Point apt at cached packages
+        run: |
+          mkdir -p ~/apt-archives/partial
+          sudo tee /etc/apt/apt.conf.d/99-cached-archives >/dev/null <<EOF
+          Dir::Cache::Archives "$HOME/apt-archives";
+          APT::Keep-Downloaded-Packages "true";
+          Binary::apt::APT::Keep-Downloaded-Packages "true";
+          EOF
+
       # The Chromium download is ~150MB and all eight jobs used to pay it. Cache
-      # the browser itself; the apt libraries it links against cannot be cached
-      # usefully, so install-deps still runs every time (it is fast).
+      # the browser itself; install-deps still runs every time, but its packages
+      # come from the apt cache above.
       - name: Resolve Playwright version
         id: playwright-version
         run: echo "version=$(python -c 'import importlib.metadata as m; print(m.version("playwright"))')" >> "$GITHUB_OUTPUT"
