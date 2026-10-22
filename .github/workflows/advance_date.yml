@@ -179,18 +179,22 @@ jobs:
 
       # Some runners get an Ubuntu mirror that crawls at ~50 kB/s, which turned
       # the apt installs below (Chromium libraries, WARP) into 20+ minute steps.
-      # Keep the downloaded .debs in the Actions cache, keyed on the runner image
-      # so a new image starts a fresh set. apt still resolves and verifies every
-      # package; it only skips the download when the cached file matches.
+      # The downloaded .debs live in one shared Actions cache. It is restored by
+      # prefix, so a new runner image or package update reuses everything that
+      # still matches, and it is saved right after the installs (not at job end)
+      # so a cancelled or failed scrape still contributes it.
       - name: Resolve runner image
         id: runner-image
-        run: echo "version=${ImageOS}-${ImageVersion}" >> "$GITHUB_OUTPUT"
+        run: echo "os=${ImageOS}" >> "$GITHUB_OUTPUT"
 
-      - name: Cache apt packages
-        uses: actions/cache@v4
+      - name: Restore apt packages
+        id: apt-restore
+        uses: actions/cache/restore@v4
         with:
           path: ~/apt-archives/*.deb
-          key: apt-${{ steps.runner-image.outputs.version }}
+          key: apt-${{ steps.runner-image.outputs.os }}-
+          restore-keys: |
+            apt-${{ steps.runner-image.outputs.os }}-
 
       - name: Point apt at cached packages
         run: |
@@ -261,6 +265,33 @@ jobs:
             exit 1
           fi
           echo "WARP active: $BEFORE -> $AFTER"
+
+      # Drop .debs that no longer match an installed package, then save under a
+      # key derived from the remaining file set. Unchanged set means no save.
+      - name: Prune apt packages
+        id: apt-key
+        if: ${{ !cancelled() }}
+        run: |
+          shopt -s nullglob
+          for f in ~/apt-archives/*.deb; do
+            p=$(dpkg-deb -f "$f" Package)
+            v=$(dpkg-deb -f "$f" Version)
+            [ "$(dpkg-query -W -f='${Version}' "$p" 2>/dev/null)" = "$v" ] || rm -f "$f"
+          done
+          debs=(~/apt-archives/*.deb)
+          [ ${#debs[@]} -gt 0 ] || exit 0
+          key="apt-${{ steps.runner-image.outputs.os }}-$(printf '%s\n' "${debs[@]##*/}" | sort | sha256sum | cut -c1-16)"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "${#debs[@]} packages, key $key (restored ${{ steps.apt-restore.outputs.cache-matched-key || 'nothing' }})"
+          [ "$key" != "${{ steps.apt-restore.outputs.cache-matched-key }}" ] && echo "changed=true" >> "$GITHUB_OUTPUT" || true
+
+      - name: Save apt packages
+        if: ${{ !cancelled() && steps.apt-key.outputs.changed == 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ~/apt-archives/*.deb
+          key: ${{ steps.apt-key.outputs.key }}
 
       - name: Scrape shard ${{ matrix.shard }}
         working-directory: private-src
