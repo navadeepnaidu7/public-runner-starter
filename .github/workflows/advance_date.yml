@@ -203,11 +203,35 @@ jobs:
           Dir::Cache::Archives "$HOME/apt-archives";
           APT::Keep-Downloaded-Packages "true";
           Binary::apt::APT::Keep-Downloaded-Packages "true";
+          Acquire::http::Timeout "15";
+          Acquire::https::Timeout "15";
           EOF
 
+      # With a warm cache every package below is already on disk, so install
+      # straight from it and never touch the Ubuntu mirror. Anything that goes
+      # wrong falls back to the normal apt path in the next steps.
+      - name: Install cached apt packages
+        if: steps.apt-restore.outputs.cache-matched-key != ''
+        continue-on-error: true
+        run: |
+          shopt -s nullglob
+          todo=()
+          for f in ~/apt-archives/*.deb; do
+            p=$(dpkg-deb -f "$f" Package)
+            v=$(dpkg-deb -f "$f" Version)
+            cur=$(dpkg-query -W -f='${Version}' "$p" 2>/dev/null || true)
+            if [ -z "$cur" ] || dpkg --compare-versions "$v" gt "$cur"; then todo+=("$f"); fi
+          done
+          echo "${#todo[@]} cached packages to install"
+          [ ${#todo[@]} -gt 0 ] || exit 0
+          if ! sudo DEBIAN_FRONTEND=noninteractive dpkg -i "${todo[@]}"; then
+            sudo apt-get update -qq
+            sudo DEBIAN_FRONTEND=noninteractive apt-get -f install -y -qq
+          fi
+
       # The Chromium download is ~150MB and all eight jobs used to pay it. Cache
-      # the browser itself; install-deps still runs every time, but its packages
-      # come from the apt cache above.
+      # the browser itself. install-deps (which runs apt-get update) only runs
+      # when the cached packages above left something missing.
       - name: Resolve Playwright version
         id: playwright-version
         run: echo "version=$(python -c 'import importlib.metadata as m; print(m.version("playwright"))')" >> "$GITHUB_OUTPUT"
@@ -221,7 +245,7 @@ jobs:
       - name: Install Playwright Chromium
         working-directory: private-src
         run: |
-          python -m playwright install-deps chromium
+          python -m playwright install-deps --dry-run chromium || python -m playwright install-deps chromium
           python -m playwright install chromium
 
       # Reputation only - see WARP_NOTES.md. The rate win comes from this being
@@ -241,7 +265,7 @@ jobs:
             | sudo gpg --yes --dearmor -o /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
           echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" \
             | sudo tee /etc/apt/sources.list.d/cloudflare-client.list >/dev/null
-          sudo apt-get update -qq && sudo apt-get install -y -qq cloudflare-warp
+          command -v warp-cli >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq cloudflare-warp; }
 
           sudo systemctl start warp-svc.service || sudo service warp-svc start || true
           sleep 2
