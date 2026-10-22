@@ -56,7 +56,7 @@ jobs:
   # The District kick lives in its own job below - it used to sit here, where
   # its 117s of waiting delayed all eight shards for no reason.
   prepare:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     outputs:
       date_code: ${{ steps.date.outputs.date_code }}
@@ -114,7 +114,7 @@ jobs:
   # single lock in api_server.py and seven would take a 409.
   kick-district:
     needs: prepare
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Kick District shard
@@ -139,7 +139,7 @@ jobs:
   # ===================================================================
   scrape:
     needs: prepare
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     strategy:
       # A shard that gets blocked must not cancel the other seven; each uploads
@@ -256,7 +256,7 @@ jobs:
   combine:
     needs: [prepare, kick-district, scrape]
     if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       DATE_CODE: ${{ needs.prepare.outputs.date_code }}
